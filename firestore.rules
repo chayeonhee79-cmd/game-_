@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{room} {
+      function signedIn() { return request.auth != null; }
+      function member() { return signedIn() && request.auth.uid in resource.data.members; }
+      function sameMembership() { return request.resource.data.members == resource.data.members && request.resource.data.host == resource.data.host; }
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.host == request.auth.uid
+        && request.resource.data.members == [request.auth.uid]
+        && request.resource.data.players.size() == 1
+        && request.resource.data.players[0].uid == request.auth.uid
+        && request.resource.data.status == 'lobby';
+      allow update: if signedIn() && (
+        (resource.data.status == 'lobby'
+          && !(request.auth.uid in resource.data.members)
+          && resource.data.members.size() < 4
+          && request.resource.data.members == resource.data.members.concat([request.auth.uid])
+          && request.resource.data.players.size() == resource.data.players.size() + 1
+          && request.resource.data.players[resource.data.players.size()].uid == request.auth.uid
+          && request.resource.data.players.removeAll([request.resource.data.players[resource.data.players.size()]]) == resource.data.players
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members','players','revision'])
+          && request.resource.data.revision == resource.data.revision + 1)
+        || (member() && sameMembership()
+          && resource.data.status == 'lobby'
+          && resource.data.host == request.auth.uid
+          && request.resource.data.status == 'playing'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','revision'])
+          && request.resource.data.revision == resource.data.revision + 1)
+        || (member() && sameMembership()
+          && resource.data.status == 'playing'
+          && resource.data.players[resource.data.turn].uid == request.auth.uid
+          && request.resource.data.status in ['playing','finished']
+          && request.resource.data.players.size() == resource.data.players.size()
+          && request.resource.data.revision == resource.data.revision + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['players','turn','revision','dice','pending','owners','log','results','status']))
+      );
+      allow delete: if false;
+    }
+  }
+}
